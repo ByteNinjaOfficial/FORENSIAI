@@ -33,3 +33,55 @@ htmlcov/
 
 # MyPy
 .mypy_cache/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+backend/venv/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# Runtime data
+*.db
+*.sqlite
+*.sqlite3
+uploads/
+backend/uploads/
+
+# Logs
+*.log
+
+# Frontend
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/dist/
+
+# Local tool state
+.opencode/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
