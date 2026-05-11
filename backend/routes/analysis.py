@@ -14,9 +14,10 @@ from services.tod_calculator import TODCalculator
 from agents.autopsy_agent import analyze_autopsy_report
 from agents.correlation_agent import analyze_correlations
 from agents.summary_agent import generate_investigation_summary
-from datetime import datetime
+from datetime import datetime, timedelta
 from aiventra.core.image_analyzer import analyze_pdf_images
 from aiventra.core.pipeline import run_pipeline
+from aiventra.core.video_analyzer import analyze_cctv_video
 
 router = APIRouter(prefix="/cases", tags=["analysis"])
 
@@ -56,7 +57,8 @@ async def process_case_analysis(
             "autopsy": {},
             "autopsy_texts": [],
             "events": [],
-            "metadata": {}
+            "metadata": {},
+            "video_analyses": []
         }
         
         for evidence in evidence_files:
@@ -82,7 +84,21 @@ async def process_case_analysis(
                     )
                     evidence.processed = True
                 
-                elif evidence.file_type in ["cctv", "gps", "metadata"]:
+                elif evidence.file_type == "cctv":
+                    if _is_video_file(evidence.file_path):
+                        video_result = _analyze_cctv_with_aiventra(evidence.file_path)
+                        if video_result:
+                            parsed_evidence["video_analyses"].append(video_result)
+                            parsed_evidence["events"].extend(
+                                _video_result_to_timeline_events(video_result, evidence.file_name)
+                            )
+                        evidence.processed = True
+                    else:
+                        events = parse_and_normalize(evidence.file_path, evidence.file_type)
+                        parsed_evidence["events"].extend(events)
+                        evidence.processed = True
+
+                elif evidence.file_type in ["gps", "metadata"]:
                     # Parse CSV/metadata
                     events = parse_and_normalize(evidence.file_path, evidence.file_type)
                     parsed_evidence["events"].extend(events)
@@ -166,6 +182,20 @@ async def process_case_analysis(
         
         parsed_evidence["autopsy"] = autopsy_result
 
+        if parsed_evidence["video_analyses"]:
+            ai_result = AIResult(
+                case_id=case_id,
+                agent_name="cctv_video_agent",
+                result_json={
+                    "videos": parsed_evidence["video_analyses"],
+                    "total_videos": len(parsed_evidence["video_analyses"]),
+                    "total_events": sum(item.get("total_events", 0) for item in parsed_evidence["video_analyses"]),
+                    "analysis_mode": "aiventra_cctv_video_analysis"
+                }
+            )
+            db.add(ai_result)
+            db.commit()
+
         if autopsy_result.get("cause_of_death") or autopsy_result.get("injuries"):
             autopsy_event = {
                 "timestamp": datetime.utcnow().isoformat(),
@@ -195,6 +225,7 @@ async def process_case_analysis(
         evidence_for_correlation = {
             "events": timeline,
             "autopsy": parsed_evidence["autopsy"],
+            "video_analysis": parsed_evidence.get("video_analyses", []),
             "witnesses": {}
         }
         
@@ -216,6 +247,7 @@ async def process_case_analysis(
         evidence_for_risk = {
             "events": timeline,
             "autopsy": parsed_evidence["autopsy"],
+            "video_analysis": parsed_evidence.get("video_analyses", []),
             "anomalies": parsed_evidence.get("anomalies", []),
             "case_notes": case.notes or "",
             "witnesses": {}
@@ -248,6 +280,7 @@ async def process_case_analysis(
             "cause_of_death": autopsy_result.get("cause_of_death", ""),
             "injuries": autopsy_result.get("injuries", []),
             "events": timeline,
+            "video_analysis": parsed_evidence.get("video_analyses", []),
             "anomalies": parsed_evidence.get("anomalies", []),
             "risk_level": risk_assessment["risk_level"]
         }
@@ -283,6 +316,78 @@ def _build_autopsy_timeline_event(autopsy_result: dict) -> str:
     if injuries:
         return f"{cause}; key injuries: {', '.join(injuries[:4])}"
     return cause
+
+
+def _is_video_file(file_path: str) -> bool:
+    """Detect uploaded CCTV video files instead of treating every CCTV upload as CSV."""
+    return Path(file_path).suffix.lower() in {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
+
+
+def _analyze_cctv_with_aiventra(file_path: str) -> dict:
+    """Run AIVENTRA Track B CCTV analysis and return JSON-safe output."""
+    try:
+        debug_dir = Path(file_path).parent / "_video_frames"
+        result = analyze_cctv_video(
+            Path(file_path),
+            output_dir=debug_dir,
+            sample_fps=1,
+        )
+        return result.model_dump(mode="json")
+    except Exception as e:
+        log_error("AIVENTRA CCTV video analysis failed", e)
+        return {
+            "video_path": str(file_path),
+            "events": [],
+            "total_events": 0,
+            "frames_sampled": 0,
+            "motion_frames": 0,
+            "yolo_relevant_frames": 0,
+            "error": str(e),
+        }
+
+
+def _video_result_to_timeline_events(video_result: dict, file_name: str) -> list[dict]:
+    """Convert Track B video events into timeline entries used by reports."""
+    events = []
+    for item in video_result.get("events", []):
+        event_type = item.get("event_type", "cctv_event")
+        timestamp_seconds = item.get("timestamp_seconds", 0)
+        frame_number = item.get("frame_number", 0)
+        description = item.get("event_description", "CCTV event detected")
+        confidence = item.get("confidence", 0.0)
+        severity = "high" if event_type in {"weapon_visible", "blood_visible"} else "medium"
+        event_timestamp = (datetime.utcnow() + timedelta(seconds=float(timestamp_seconds))).isoformat()
+        events.append({
+            "timestamp": event_timestamp,
+            "source": "cctv_video",
+            "event": f"{file_name}: {description}",
+            "severity": severity,
+            "metadata": {
+                "event_type": event_type,
+                "timestamp_seconds": timestamp_seconds,
+                "frame_number": frame_number,
+                "confidence": confidence,
+                "detected_objects": item.get("detected_objects", []),
+                "flags": item.get("flags", []),
+            }
+        })
+    if not events:
+        events.append({
+            "timestamp": datetime.utcnow().isoformat(),
+            "source": "cctv_video",
+            "event": (
+                f"{file_name}: CCTV video was processed, but no forensic video events "
+                "were detected or the analyzer returned fallback-only output."
+            ),
+            "severity": "low",
+            "metadata": {
+                "frames_sampled": video_result.get("frames_sampled", 0),
+                "motion_frames": video_result.get("motion_frames", 0),
+                "yolo_relevant_frames": video_result.get("yolo_relevant_frames", 0),
+                "error": video_result.get("error"),
+            }
+        })
+    return events
 
 
 def _analyze_autopsy_with_aiventra(file_path: str) -> dict:

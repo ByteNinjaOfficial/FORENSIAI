@@ -1,106 +1,101 @@
 # AIVENTRA — AI-Powered Forensic Triage & Postmortem Intelligence System
 
-## Project Overview
-
-Forensic investigation assistance platform. Not a replacement for forensic experts or legal authorities — all outputs support human decision-making only.
-
 ## Stack
 
 - Python 3.10+; `requirements.txt` (root) has AIVENTRA CLI deps only
-- `backend/` uses its own `requirements.txt` (FastAPI + CrewAI + SQLite)
-- `frontend/` is Vite + React + TypeScript; runs separately
-- LLM: DeepSeek-V4-Pro via Featherless API (OpenAI-compatible), temperature=0.0
+- `backend/` has its own `requirements.txt` (FastAPI + web deps — no CLI deps)
+- `aiventra/` package lives at `backend/aiventra/` — NOT at the repo root
+- `frontend/` is Vite + React + TypeScript; runs on port **3000** (not 3001)
+
+## Running the AIVENTRA CLI
+
+The `aiventra/` package is inside `backend/`. From the repo root you **must** set `PYTHONPATH`:
+
+```bash
+# Install CLI deps first (root requirements.txt)
+pip install -r requirements.txt
+
+# All CLI commands require PYTHONPATH=backend
+PYTHONPATH=backend python3 -m aiventra.cli.main analyze report.pdf
+PYTHONPATH=backend python3 -m aiventra.cli.main analyze-images report.pdf
+PYTHONPATH=backend python3 -m aiventra.cli.main analyze-video clip.mp4
+PYTHONPATH=backend python3 -m aiventra.cli.main check
+```
+
+Or `cd backend` then run without PYTHONPATH (backend/ becomes cwd so `aiventra` resolves).
+
+## Running Tests
+
+```bash
+# ALL tests require PYTHONPATH=backend — no pytest.ini or conftest.py exists
+PYTHONPATH=backend python3 -m pytest tests/ -v   # 78 tests
+```
+
+Running `python3 -m pytest tests/` from root without PYTHONPATH fails with `ModuleNotFoundError: No module named 'aiventra'`.
+
+## Running the ForensiAI Web Platform
+
+```bash
+# Backend (port 8000) — separate deps from CLI; needs backend/.env
+cd backend && pip install -r requirements.txt && cp .env.example .env && python main.py
+
+# Frontend (port 3000) — no Vite proxy; direct Axios calls to http://localhost:8000
+cd frontend && npm install && npm run dev
+```
 
 ## Architecture
 
 ```
-root/
-├── aiventra/                  AIVENTRA CLI package (Phase 1-2)
-│   ├── core/
-│   │   ├── pipeline.py        Orchestrator: PDF → parse → preprocess → extract → validate
-│   │   ├── pdf_parser.py      pdfplumber + PyMuPDF + pytesseract OCR fallback
-│   │   ├── rule_preprocessor.py 25-section detection, 9-pattern PII redaction, normalization
-│   │   ├── llm_extractor.py   DeepSeek-V4-Pro via Featherless API, structured JSON extraction
-│   │   ├── validator.py       Hallucination detection, cross-referencing, confidence adjustment
-│   │   ├── schemas.py         Pydantic models: AutopsyExtraction, ForensicImageResult, VideoEvent
-│   │   ├── image_analyzer.py  Track A: PyMuPDF extract → all images → Qwen3.5-397B (batch=2)
-│   │   ├── video_analyzer.py  Track B: OpenCV → MOG2 → YOLOv11n batch → Qwen3.5-397B (batch=2)
-│   │   └── config.py          API_KEY, BASE_URL, MODEL_NAME from .env
-│   └── cli/main.py            Typer CLI: analyze, analyze-images, analyze-video, check
-├── backend/                   ForensiAI FastAPI web platform
-│   ├── main.py                FastAPI entry (port 8000)
-│   ├── routes/analysis.py     8-stage pipeline; Stage 5 calls agents/autopsy_agent.py
-│   ├── agents/               CrewAI agents (autopsy, correlation, summary) using Qwen2.5-7B
-│   └── services/              tod_calculator, risk_engine, timeline_engine, pdf_parser
-├── frontend/                 Vite + React (port 3001), talks to backend:8000
-└── tests/                    Unit tests for AIVENTRA (import from root `aiventra/`)
+backend/
+├── main.py                  FastAPI entry (port 8000)
+├── config.py                ForensiAI settings (Qwen2.5-7B, SQLite, uploads)
+├── routes/analysis.py       8-stage pipeline; calls aiventra.* directly
+├── agents/                  CrewAI agents: autopsy, correlation, summary (Qwen2.5-7B)
+├── services/                tod_calculator, risk_engine, timeline_engine, pdf_parser
+└── aiventra/                AIVENTRA forensic extraction engine
+    ├── core/
+    │   ├── pipeline.py      PDF → parse → preprocess → extract → validate (DeepSeek-V4-Pro)
+    │   ├── image_analyzer.py Track A: PyMuPDF extract → Qwen3.5-397B VLM (batch=2, no YOLO)
+    │   ├── video_analyzer.py Track B: OpenCV → MOG2 → YOLOv11n → Qwen3.5-397B VLM (batch=2)
+    │   ├── llm_extractor.py DeepSeek-V4-Pro via Featherless API, JSON extraction
+    │   ├── validator.py     Hallucination detection, cross-reference, confidence adj
+    │   ├── rule_preprocessor.py 25-section detection, 9-pattern PII redaction
+    │   ├── schemas.py       Pydantic models
+    │   └── config.py        AIVENTRA settings (DeepSeek-V4-Pro, env vars)
+    └── cli/main.py          Typer CLI: analyze, analyze-images, analyze-video, check
 ```
 
-## Core Modules
-
-1. **Autopsy Report Analysis** — NLP extraction of cause of death, injury patterns, medical observations *(v1 — implemented)*
-2. **Forensic Image Analysis (Track A)** — Extract images from PDF → Qwen3.5-397B forensic captioning, batch=2 *(v1 — implemented)*
-3. **CCTV Video Analysis (Track B)** — OpenCV frame sampling → MOG2 motion → YOLOv11n batch → Qwen3.5-397B *(v1 — implemented)*
-4. **Time-of-Death Estimation** — Body temperature, rigor mortis, livor mortis, environmental conditions
-5. **Digital Evidence Correlation** — CCTV logs, timestamps, mobile metadata, geolocation into patterns/timelines
-6. **Case Risk Scoring & Anomaly Detection** — Suspicious patterns, structured case insights for triage
-7. **Interactive Investigation Dashboard** — Summarized reports, evidence timelines, visual insights
-
-## AIVENTRA CLI Commands
-
-```bash
-# Install AIVENTRA CLI deps
-pip install -r requirements.txt
-
-# Run tests (78 tests, all passing)
-python3 -m pytest tests/ -v
-
-# Analyze autopsy report (Phase 1)
-python3 -m aiventra.cli.main analyze report.pdf
-
-# Analyze embedded images in a PDF (Phase 2 Track A)
-python3 -m aiventra.cli.main analyze-images report.pdf
-
-# Analyze CCTV video clip (Phase 2 Track B)
-python3 -m aiventra.cli.main analyze-video clip.mp4
-
-# Check configuration and dependencies
-python3 -m aiventra.cli.main check
-```
-
-## ForensiAI Web Platform Commands
-
-```bash
-# Backend (port 8000)
-cd backend && pip install -r requirements.txt && python main.py
-
-# Frontend (port 3001)
-cd frontend && npm install && npm run dev
-```
-
-## AIVENTRA Pipeline
+## ForensiAI 8-Stage Pipeline
 
 ```
-PDF → pdf_parser → rule_preprocessor → llm_extractor → validator → ExtractionResult
-  (text+tables)  (sections, PII,   (DeepSeek API,     (cross-ref,
-                        normalize)    JSON extraction)  confidence adj)
-
-PDF → extract_images_from_pdf → analyze_images_qwen → ImageAnalysisResult
-  (PyMuPDF)                            (Qwen3.5-397B, batch=2)
-
-Video → sample_frames → detect_motion_frames → detect_objects_batch → classify_events
-  (OpenCV)        (MOG2)               (YOLOv11n mp.Pool)
-              → analyze_frames_qwen_batched → VideoAnalysisResult
-                                 (Qwen3.5-397B, batch=2)
+POST /cases/{id}/analyze  (FastAPI background task)
+  Stage 1: Parse — calls aiventra.core.pipeline (text), aiventra.core.image_analyzer (Track A),
+           aiventra.core.video_analyzer (Track B), csv_parser
+  Stage 2: Normalize data
+  Stage 3: Time-of-death (Henssge nomogram, deterministic)
+  Stage 4: Timeline reconstruction (deterministic)
+  Stage 5: Hybrid autopsy — AIVENTRA extraction + CrewAI autopsy_agent (Qwen2.5-7B) enrichment
+  Stage 6: Correlation agent (Qwen2.5-7B, anomaly detection)
+  Stage 7: Risk engine (11-rule scoring: LOW/MEDIUM/HIGH/CRITICAL)
+  Stage 8: Summary agent (Qwen2.5-7B, final report)
+  → persisted to SQLite (forensiai.db)
 ```
+
+## Dual LLM Models — Both Use Same API Key
+
+| Component | Model | .env location |
+|---|---|---|
+| AIVENTRA (CLI + ForensiAI Stage 1) | DeepSeek-V4-Pro | root `.env` (`FEATHERLESS_API_KEY`) |
+| ForensiAI CrewAI agents (Stages 5,6,8) | Qwen2.5-7B-Instruct | `backend/.env` (`FEATHERLESS_API_KEY`) |
+
+Both read `FEATHERLESS_API_KEY` via `load_dotenv()` at import time. Key must be set before any module imports.
 
 ## Gotchas
 
-- `tests/` imports `aiventra.core.*` — relies on working directory being root with `aiventra/` accessible on the Python path. Tests pass from root with no extra setup.
-- `.env` files (API keys) are gitignored — copy `.env.example` to `.env` before running anything
-- **Dual LLM models**: AIVENTRA uses **DeepSeek-V4-Pro**; ForensiAI's CrewAI agents use **Qwen2.5-7B**. Different models, different `.env` vars. Do not assume they share the same key.
+- `imghdr` deprecation warning in image_analyzer.py (Python 3.13 removal) — harmless
+- `backend/requirements.txt` does NOT include AIVENTRA CLI deps (no typer, openai, PyMuPDF, opencv, ultralytics)
+- `.env` files are gitignored — copy `.env.example` to `.env` in both root and `backend/`
 - PII redaction is ON by default (`--no-redact` to disable in CLI)
-- All AI-generated outputs must be marked as **advisory, not conclusive**
+- All AI-generated outputs are marked **advisory, not conclusive**
 - Every extracted field links back to **source location** (page/section) for audit trail
 - Track A (image_analyzer.py) does **not** use YOLO — the VLM sees every extracted image directly
-- `imghdr` deprecation warning in image_analyzer.py (Python 3.13 removal pending) — harmless for now

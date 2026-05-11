@@ -193,7 +193,9 @@ def _answer_from_report(question: str, report: dict) -> tuple[str, list[str]]:
     """Small deterministic Q&A layer grounded in the generated report."""
     q = question.lower()
     structured = report.get("structured_report", {})
+    case_details = structured.get("case_details", {})
     autopsy = structured.get("autopsy_findings", {})
+    cctv = structured.get("cctv_video_analysis", {}) or report.get("cctv_video_analysis", {})
     correlation = structured.get("correlation_analysis", {})
     summary = structured.get("investigation_summary", {})
     intelligence = structured.get("investigative_intelligence") or report.get("investigative_intelligence", {})
@@ -204,6 +206,33 @@ def _answer_from_report(question: str, report: dict) -> tuple[str, list[str]]:
 
     sources: list[str] = []
     parts: list[str] = []
+
+    if any(term in q for term in ["victim", "who died", "deceased", "person involved", "case about"]):
+        victim_name = case_details.get("victim_name") or report.get("victim_name") or "unknown victim"
+        location = case_details.get("incident_location") or report.get("incident_location") or "unknown location"
+        incident_date = case_details.get("incident_date") or report.get("incident_date") or "unknown date"
+        parts.append(
+            f"The victim recorded for this case is {victim_name}. "
+            f"The incident location is {location}, with incident date {incident_date}."
+        )
+        sources.append("structured_report.case_details")
+
+    if any(term in q for term in ["cctv", "video", "footage", "camera"]):
+        videos = cctv.get("videos", [])
+        total_events = cctv.get("total_events", 0)
+        if videos:
+            parts.append(
+                f"CCTV video analysis processed {cctv.get('total_videos', len(videos))} video file(s) "
+                f"and produced {total_events} video event(s)."
+            )
+            first_video = videos[0]
+            video_events = first_video.get("events", [])
+            if video_events:
+                preview = video_events[0].get("event_description", "Video event detected")
+                parts.append(f"First CCTV finding: {preview}")
+        else:
+            parts.append("No processed CCTV video analysis is available in the structured report yet.")
+        sources.append("structured_report.cctv_video_analysis")
 
     if any(term in q for term in ["autopsy", "cause", "manner", "injur", "toxicology"]):
         injuries = autopsy.get("injuries") or report.get("injuries") or []

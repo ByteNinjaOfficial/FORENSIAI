@@ -66,6 +66,16 @@ class ReportGenerator:
         )
         summary_data = summary_result.result_json if summary_result else {}
 
+        cctv_result = next(
+            (r for r in ai_results if r.agent_name == "cctv_video_agent"),
+            None
+        )
+        cctv_data = cctv_result.result_json if cctv_result else {
+            "videos": [],
+            "total_videos": 0,
+            "total_events": 0
+        }
+
         timeline = [
             {
                 "timestamp": e.timestamp,
@@ -143,6 +153,7 @@ class ReportGenerator:
                 "total_events": len(timeline),
                 "events": timeline
             },
+            "cctv_video_analysis": cctv_data,
             "correlation_analysis": {
                 "anomalies": anomalies,
                 "suspicious_patterns": suspicious_patterns,
@@ -175,6 +186,7 @@ class ReportGenerator:
             "injuries": injuries,
             "toxicology": toxicology,
             "timeline": timeline,
+            "cctv_video_analysis": cctv_data,
             "anomalies": anomalies,
             "suspicious_patterns": suspicious_patterns,
             "risk_level": case.risk_level,

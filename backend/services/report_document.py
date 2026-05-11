@@ -10,6 +10,7 @@ def render_report_html(report: Dict[str, Any]) -> str:
     evidence = structured.get("evidence_summary", {})
     autopsy = structured.get("autopsy_findings", {})
     timeline = structured.get("timeline_analysis", {})
+    cctv = structured.get("cctv_video_analysis", report.get("cctv_video_analysis", {}))
     correlation = structured.get("correlation_analysis", {})
     risk = structured.get("risk_assessment", {})
     summary = structured.get("investigation_summary", {})
@@ -183,6 +184,15 @@ def render_report_html(report: Dict[str, Any]) -> str:
     </section>
 
     <section>
+      <h2>CCTV Video Analysis</h2>
+      <div class="grid">
+        {_field("Videos Processed", cctv.get("total_videos", 0))}
+        {_field("Video Events", cctv.get("total_events", 0))}
+      </div>
+      {_cctv_table(cctv.get("videos", []))}
+    </section>
+
+    <section>
       <h2>Investigative Hypotheses</h2>
       {_hypothesis_table(intelligence.get("investigative_hypotheses", []))}
     </section>
@@ -246,6 +256,7 @@ def render_report_markdown(report: Dict[str, Any]) -> str:
     evidence = structured.get("evidence_summary", {})
     autopsy = structured.get("autopsy_findings", {})
     timeline = structured.get("timeline_analysis", {})
+    cctv = structured.get("cctv_video_analysis", report.get("cctv_video_analysis", {}))
     correlation = structured.get("correlation_analysis", {})
     risk = structured.get("risk_assessment", {})
     summary = structured.get("investigation_summary", {})
@@ -292,6 +303,15 @@ def render_report_markdown(report: Dict[str, Any]) -> str:
     lines.extend(_markdown_list(intelligence.get("timeline_interpretation", []), "No timeline interpretation generated"))
     lines.extend(["", f"Likely scene assessment: {intelligence.get('likely_scene_assessment', 'No scene assessment generated.')}"])
     lines.extend(_markdown_list([f"{event.get('timestamp')} [{event.get('source')}] {event.get('event')}" for event in timeline.get("events", report.get("timeline", []))], "No timeline events returned"))
+    lines.extend([
+        "",
+        "## CCTV Video Analysis",
+        f"- Videos Processed: {cctv.get('total_videos', 0)}",
+        f"- Video Events: {cctv.get('total_events', 0)}",
+        "",
+        "### CCTV Findings",
+    ])
+    lines.extend(_markdown_list(_cctv_markdown_items(cctv.get("videos", [])), "No CCTV video findings returned"))
     lines.extend(["", "## Investigative Hypotheses"])
     lines.extend(_markdown_list([f"{item.get('title')} ({item.get('confidence')}): {item.get('reasoning')}" for item in intelligence.get("investigative_hypotheses", [])], "No hypotheses generated"))
     lines.extend(["", "## Priority Leads"])
@@ -344,6 +364,42 @@ def _timeline_table(events: list[Dict[str, Any]]) -> str:
         for item in events
     )
     return f"<table><thead><tr><th>Timestamp</th><th>Source</th><th>Severity</th><th>Event</th></tr></thead><tbody>{rows}</tbody></table>"
+
+
+def _cctv_table(videos: list[Dict[str, Any]]) -> str:
+    rows = []
+    for video in videos:
+        video_name = video.get("video_path", "CCTV video")
+        for event in video.get("events", []):
+            rows.append(
+                "<tr>"
+                f"<td>{escape(str(video_name))}</td>"
+                f"<td>{escape(str(event.get('timestamp_seconds', '')))}s</td>"
+                f"<td>{escape(str(event.get('event_type', '')))}</td>"
+                f"<td>{escape(str(event.get('confidence', '')))}</td>"
+                f"<td>{escape(str(event.get('event_description', '')))}</td>"
+                "</tr>"
+            )
+    if not rows:
+        return '<p class="muted" style="margin-top:14px;">No CCTV video findings returned.</p>'
+    return (
+        '<table style="margin-top:16px;">'
+        "<thead><tr><th>Video</th><th>Time</th><th>Event Type</th><th>Confidence</th><th>Description</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _cctv_markdown_items(videos: list[Dict[str, Any]]) -> list[str]:
+    items = []
+    for video in videos:
+        video_name = video.get("video_path", "CCTV video")
+        for event in video.get("events", []):
+            items.append(
+                f"{video_name} @ {event.get('timestamp_seconds', 0)}s "
+                f"[{event.get('event_type', 'event')}, confidence {event.get('confidence', 'N/A')}]: "
+                f"{event.get('event_description', 'No description')}"
+            )
+    return items
 
 
 def _flag_table(flags: list[Dict[str, Any]]) -> str:

@@ -352,14 +352,12 @@ function CaseDetails({ report, timeline, intelligence, onOpenReport, onReportRea
     setGenerating(true);
     setStatusMessage("Generating investigation report...");
     try {
-      if (report.status !== "completed") {
-        await analyzeCase(report.case_id);
-        for (let index = 0; index < 30; index += 1) {
-          const result = await getAnalysisResults(report.case_id);
-          if (result.status === "failed") throw new Error(result.message || "Analysis failed");
-          if (result.status === "complete") break;
-          await delay(1500);
-        }
+      await analyzeCase(report.case_id);
+      for (let index = 0; index < 80; index += 1) {
+        const result = await getAnalysisResults(report.case_id);
+        if (result.status === "failed") throw new Error(result.message || "Analysis failed");
+        if (result.status === "complete") break;
+        await delay(1500);
       }
       const refreshed = await getReport(report.case_id);
       onReportReady(refreshed);
