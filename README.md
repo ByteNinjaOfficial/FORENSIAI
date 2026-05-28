@@ -208,7 +208,7 @@ A React single-page application with 7 tabs communicating with the FastAPI backe
 ### 1. Frontend (recommended first)
 
 ```bash
-cd apps/forensi-frontend
+cd frontend
 npm install
 npm run dev
 # Opens at http://localhost:3000
@@ -217,7 +217,7 @@ npm run dev
 ### 2. Backend API
 
 ```bash
-cd apps/forensi-api
+cd backend
 pip install -r requirements.txt
 cp .env.example .env
 # Add FEATHERLESS_API_KEY to .env
